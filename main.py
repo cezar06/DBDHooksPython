@@ -1,5 +1,10 @@
 import tkinter as tk
 from tkinter import ttk
+import threading
+import time
+import pyautogui
+from PIL import Image
+import os
 
 class DBDHookDetectorApp:
     def __init__(self, root):
@@ -43,17 +48,38 @@ class DBDHookDetectorApp:
 
             self.label_vars[survivor] = count_var
 
+        # Initialize threading variables
+        self.running = False
+        self.thread = None
+        self.screenshot_interval = 5  # seconds
+        self.screenshot_folder = "screenshots"
+
+        # Create screenshot folder if it doesn't exist
+        if not os.path.exists(self.screenshot_folder):
+            os.makedirs(self.screenshot_folder)
+
     def start_detection(self):
-        # Placeholder for starting the detection process
+        self.running = True
         self.start_button.config(state=tk.DISABLED)
         self.stop_button.config(state=tk.NORMAL)
+        self.thread = threading.Thread(target=self.capture_screenshots, daemon=True)
+        self.thread.start()
         print("Detection started.")
 
     def stop_detection(self):
-        # Placeholder for stopping the detection process
+        self.running = False
         self.start_button.config(state=tk.NORMAL)
         self.stop_button.config(state=tk.DISABLED)
         print("Detection stopped.")
+
+    def capture_screenshots(self):
+        while self.running:
+            screenshot = pyautogui.screenshot()
+            timestamp = time.strftime("%Y%m%d-%H%M%S")
+            filepath = os.path.join(self.screenshot_folder, f"screenshot_{timestamp}.png")
+            screenshot.save(filepath)
+            print(f"Screenshot saved: {filepath}")
+            time.sleep(self.screenshot_interval)
 
 def main():
     root = tk.Tk()
