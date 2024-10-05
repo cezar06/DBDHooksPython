@@ -5,6 +5,8 @@ import time
 import pyautogui
 from PIL import Image
 import os
+import cv2
+import numpy as np
 
 class DBDHookDetectorApp:
     def __init__(self, root):
@@ -58,11 +60,34 @@ class DBDHookDetectorApp:
         if not os.path.exists(self.screenshot_folder):
             os.makedirs(self.screenshot_folder)
 
+        # Define survivor icon regions (replace with your actual coordinates)
+        self.survivor_regions = {
+            "Survivor 1": (80, 410, 95, 80),
+            "Survivor 2": (80, 505, 95, 80),
+            "Survivor 3": (80, 590, 95, 80),
+            "Survivor 4": (80, 675, 95, 80),
+        }
+
+        # Load hooked state templates
+        self.hooked_templates = {}
+        template_folder = "hooked_templates"
+        for survivor in self.survivors:
+            template_path = os.path.join(template_folder, f"{survivor.lower().replace(' ', '')}_hooked.png")
+            if os.path.exists(template_path):
+                template_image = cv2.imread(template_path, cv2.IMREAD_COLOR)
+                template_gray = cv2.cvtColor(template_image, cv2.COLOR_BGR2GRAY)
+                self.hooked_templates[survivor] = template_gray
+            else:
+                print(f"Template for {survivor} not found at {template_path}")
+
+        # To avoid counting the same hook multiple times
+        self.previous_hook_states = {survivor: False for survivor in self.survivors}
+
     def start_detection(self):
         self.running = True
         self.start_button.config(state=tk.DISABLED)
         self.stop_button.config(state=tk.NORMAL)
-        self.thread = threading.Thread(target=self.capture_screenshots, daemon=True)
+        self.thread = threading.Thread(target=self.capture_and_analyze_screenshots, daemon=True)
         self.thread.start()
         print("Detection started.")
 
@@ -72,13 +97,34 @@ class DBDHookDetectorApp:
         self.stop_button.config(state=tk.DISABLED)
         print("Detection stopped.")
 
-    def capture_screenshots(self):
+    def capture_and_analyze_screenshots(self):
         while self.running:
             screenshot = pyautogui.screenshot()
-            timestamp = time.strftime("%Y%m%d-%H%M%S")
-            filepath = os.path.join(self.screenshot_folder, f"screenshot_{timestamp}.png")
-            screenshot.save(filepath)
-            print(f"Screenshot saved: {filepath}")
+            screenshot_cv = cv2.cvtColor(np.array(screenshot), cv2.COLOR_RGB2BGR)
+
+            for survivor, region in self.survivor_regions.items():
+                x, y, w, h = region
+                survivor_img = screenshot_cv[y:y+h, x:x+w]
+                survivor_gray = cv2.cvtColor(survivor_img, cv2.COLOR_BGR2GRAY)
+
+                template = self.hooked_templates.get(survivor)
+                if template is not None:
+                    res = cv2.matchTemplate(survivor_gray, template, cv2.TM_CCOEFF_NORMED)
+                    threshold = 0.9  # Adjust based on testing
+                    print(res)
+                    loc = np.where(res >= threshold)
+
+                    hooked = False
+                    if len(loc[0]) > 0:
+                        hooked = True
+
+                    if hooked and not self.previous_hook_states[survivor]:
+                        self.hook_counts[survivor] += 1
+                        self.label_vars[survivor].set(f"Hooks: {self.hook_counts[survivor]}")
+                        print(f"{survivor} has been hooked! Total hooks: {self.hook_counts[survivor]}")
+                    
+                    self.previous_hook_states[survivor] = hooked
+
             time.sleep(self.screenshot_interval)
 
 def main():
