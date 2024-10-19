@@ -7,6 +7,7 @@ from PIL import Image
 import os
 import cv2
 import numpy as np
+from skimage.metrics import structural_similarity as ssim
 
 class DBDHookDetectorApp:
     def __init__(self, root):
@@ -74,14 +75,16 @@ class DBDHookDetectorApp:
         for survivor in self.survivors:
             template_path = os.path.join(template_folder, f"{survivor.lower().replace(' ', '')}_hooked.png")
             if os.path.exists(template_path):
-                template_image = cv2.imread(template_path, cv2.IMREAD_COLOR)
-                template_gray = cv2.cvtColor(template_image, cv2.COLOR_BGR2GRAY)
-                self.hooked_templates[survivor] = template_gray
+                template_image = cv2.imread(template_path, cv2.IMREAD_UNCHANGED)
+                self.hooked_templates[survivor] = template_image
             else:
                 print(f"Template for {survivor} not found at {template_path}")
 
         # To avoid counting the same hook multiple times
         self.previous_hook_states = {survivor: False for survivor in self.survivors}
+
+        # Threshold for template matching
+        self.threshold = 0.8  # You may need to fine-tune this value
 
     def start_detection(self):
         self.running = True
@@ -105,19 +108,21 @@ class DBDHookDetectorApp:
             for survivor, region in self.survivor_regions.items():
                 x, y, w, h = region
                 survivor_img = screenshot_cv[y:y+h, x:x+w]
-                survivor_gray = cv2.cvtColor(survivor_img, cv2.COLOR_BGR2GRAY)
-
+                
                 template = self.hooked_templates.get(survivor)
                 if template is not None:
-                    res = cv2.matchTemplate(survivor_gray, template, cv2.TM_CCOEFF_NORMED)
-                    threshold = 0.9  # Adjust based on testing
-                    print(res)
-                    loc = np.where(res >= threshold)
+                    # Resize survivor_img to match template size
+                    survivor_img_resized = cv2.resize(survivor_img, (template.shape[1], template.shape[0]))
+                    
+                    # Convert both images to grayscale
+                    survivor_gray = cv2.cvtColor(survivor_img_resized, cv2.COLOR_BGR2GRAY)
+                    template_gray = cv2.cvtColor(template, cv2.COLOR_BGR2GRAY)
+                    
+                    # Compute SSIM between the two images
+                    similarity, _ = ssim(survivor_gray, template_gray, full=True)
+                    print(f"{survivor} - Similarity: {similarity:.4f}")
 
-                    hooked = False
-                    if len(loc[0]) > 0:
-                        hooked = True
-
+                    hooked = similarity >= self.threshold
                     if hooked and not self.previous_hook_states[survivor]:
                         self.hook_counts[survivor] += 1
                         self.label_vars[survivor].set(f"Hooks: {self.hook_counts[survivor]}")
@@ -125,7 +130,18 @@ class DBDHookDetectorApp:
                     
                     self.previous_hook_states[survivor] = hooked
 
+                    # Debug: Save images for inspection
+                    self.save_debug_images(survivor, survivor_img_resized, similarity)
+
             time.sleep(self.screenshot_interval)
+
+    def save_debug_images(self, survivor, survivor_img, similarity):
+        debug_folder = "debug_images"
+        if not os.path.exists(debug_folder):
+            os.makedirs(debug_folder)
+        
+        cv2.imwrite(os.path.join(debug_folder, f"{survivor}_region.png"), survivor_img)
+        cv2.imwrite(os.path.join(debug_folder, f"{survivor}_similarity_{similarity:.4f}.png"), survivor_img)
 
 def main():
     root = tk.Tk()
